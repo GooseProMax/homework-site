@@ -100,7 +100,10 @@ async function main() {
     const tokenB = intro.body.token;
 
     const loginByMember = await request('POST', '/api/auth', { action: 'login', member: '小张' });
-    check('老成员选昵称直接登录（免口令）', loginByMember.status === 200 && loginByMember.body.nickname === '小张', JSON.stringify(loginByMember.body));
+    check('老成员不给口令进不来（401）', loginByMember.status === 401, JSON.stringify(loginByMember.body));
+
+    const loginOk = await request('POST', '/api/auth', { action: 'login', passcode: 'hw2025', member: '小张' });
+    check('老成员给对口令可以登录', loginOk.status === 200 && loginOk.body.nickname === '小张', JSON.stringify(loginOk.body));
 
     const unknownMember = await request('POST', '/api/auth', { action: 'login', member: '陌生人' });
     check('陌生昵称没口令进不来（401）', unknownMember.status === 401, JSON.stringify(unknownMember.body));

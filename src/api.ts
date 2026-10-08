@@ -63,11 +63,11 @@ export function normalizeDoc(raw: unknown): HomeworkDoc {
   };
 }
 
-/** 读-改-写，遇到并发冲突自动重试 */
+/** 读-改-写，遇到并发冲突自动重试。mutator 返回的 extra 字段会被展开到结果顶层 */
 async function mutate(
   store: Store,
   mutator: (doc: HomeworkDoc) => { abort?: { status: number; message: string; extra?: Record<string, unknown> }; extra?: Record<string, unknown> },
-): Promise<{ doc: HomeworkDoc; revision: number; extra: Record<string, unknown> }> {
+): Promise<{ doc: HomeworkDoc; revision: number; extra: Record<string, unknown>; [key: string]: unknown }> {
   let lastError: unknown = null;
   for (let attempt = 0; attempt < MAX_RETRY; attempt += 1) {
     const { doc: raw, revision } = await store.readDoc();
@@ -81,7 +81,7 @@ async function mutate(
     }
     try {
       const next = await store.writeDoc(doc as unknown as Record<string, unknown>, revision);
-      return { doc, revision: next, extra: result.extra ?? {} };
+      return { doc, revision: next, extra: result.extra ?? {}, ...(result.extra ?? {}) };
     } catch (err) {
       if (err instanceof ConflictError || (err as { statusCode?: number }).statusCode === 409) {
         lastError = err;
@@ -197,33 +197,32 @@ export async function authRoute(req: Request, store: Store, url: URL): Promise<R
       return json({ ok: true, token: await signSession({ nickname }), nickname, revision: outcome2.revision });
     }
 
-    /* --------- 以后进来：口令，或直接选已有昵称 --------- */
+    /* --------- 以后进来：口令 + 昵称（选已有昵称也必须给口令） --------- */
     if (action === 'login') {
       const member = String(body.member ?? '').trim().slice(0, 24);
-      const outcome = await mutate(store, (doc) => {
+      if (!member) return fail('请选择或填写昵称', 400);
+
+      // 先取出口令哈希来校验：无论是不是已有成员，都必须验证口令，
+      // 否则知道某个昵称就能绕过小组口令登录。
+      const probe = await mutate(store, (doc) => {
         const settings = doc.settings as Record<string, string>;
         if (!settings.passcodeHash) {
           return { abort: { status: 428, message: '站点还没有初始化', extra: { needSetup: true } } };
         }
-        const known = member && doc.members.some((m) => m.nickname === member);
-        if (!known) {
-          if (!member) return { abort: { status: 400, message: '请选择或填写昵称' } };
-          return { extra: { needPasscode: true, salt: settings.passcodeSalt, hash: settings.passcodeHash } };
-        }
-        return { extra: { known: true } };
+        // 注意：extra 里的字段会被 mutate() 展开到返回值顶层
+        return { extra: { salt: settings.passcodeSalt, hash: settings.passcodeHash } };
       });
+      const salt = probe.salt as string;
+      const hash = probe.hash as string;
+      if (!(await verifyPasscode(passcode, salt, hash))) return fail('口令不正确', 401);
 
-      if (outcome.extra.needPasscode) {
-        const { salt, hash } = outcome.extra as { salt: string; hash: string };
-        if (!(await verifyPasscode(passcode, salt, hash))) return fail('口令不正确', 401);
-        await mutate(store, (doc) => {
-          if (!doc.members.some((m) => m.nickname === member)) {
-            doc.members.push({ nickname: member, joinedAt: new Date().toISOString() });
-          }
-          return {};
-        });
-      }
-      return json({ ok: true, token: await signSession({ nickname: member }), nickname: member });
+      const outcome = await mutate(store, (doc) => {
+        if (!doc.members.some((m) => m.nickname === member)) {
+          doc.members.push({ nickname: member, joinedAt: new Date().toISOString() });
+        }
+        return {};
+      });
+      return json({ ok: true, token: await signSession({ nickname: member }), nickname: member, revision: outcome.revision });
     }
 
     /* --------- 改口令 --------- */

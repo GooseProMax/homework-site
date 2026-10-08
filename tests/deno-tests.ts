@@ -104,7 +104,10 @@ try {
   const tokenB = intro.body.token;
 
   const byMember = await call('POST', '/api/auth', { action: 'login', member: '小张' });
-  check('老成员选昵称免口令登录', byMember.status === 200 && byMember.body.nickname === '小张', JSON.stringify(byMember.body));
+  check('老成员不给口令进不来（401）', byMember.status === 401, JSON.stringify(byMember.body));
+
+  const byMemberOk = await call('POST', '/api/auth', { action: 'login', passcode: 'hw2025', member: '小张' });
+  check('老成员给对口令可以登录', byMemberOk.status === 200 && byMemberOk.body.nickname === '小张', JSON.stringify(byMemberOk.body));
 
   const stranger = await call('POST', '/api/auth', { action: 'login', member: '陌生人' });
   check('陌生昵称没口令进不来（401）', stranger.status === 401, JSON.stringify(stranger.body));

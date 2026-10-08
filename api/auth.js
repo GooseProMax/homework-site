@@ -174,31 +174,37 @@ module.exports = async function handler(req, res) {
       return sendJson(res, 200, { ok: true, token: sign({ nickname, role: 'member' }), nickname });
     }
 
-    /* ---------------- 再次进入（口令 或 选已有成员） ---------------- */
+    /* ---------------- 再次进入（口令 + 昵称，选已有昵称也必须给口令） ---------------- */
     if (action === 'login') {
       const member = String(body.member || '').trim().slice(0, 24);
-      let denied = null;
-      const outcome = await mutate(store, (doc) => {
+      if (!member) return fail(res, 400, '请选择或填写昵称');
+
+    // 先取出哈希校验口令：无论是否已有成员，都必须验证，
+    // 否则知道某个昵称就能绕过小组口令进来。
+    let passInfo = null;
+    try {
+      const probe = await mutate(store, (doc) => {
         if (!doc.settings.passcodeHash) {
-          denied = { status: 428, message: '站点还没有初始化', extra: { needSetup: true } };
-          return { abort: true };
+          return { abort: { status: 428, message: '站点还没有初始化', extra: { needSetup: true } } };
         }
-        const known = member && doc.members.some((m) => m.nickname === member);
-        if (!known) {
-          if (!verifyPasscode(passcode, doc.settings.passcodeSalt, doc.settings.passcodeHash)) {
-            denied = { status: 401, message: '口令不正确' };
-            return { abort: true };
-          }
-          if (!member) {
-            denied = { status: 400, message: '请选择或填写昵称' };
-            return { abort: true };
-          }
+        // 注意：extra 里的字段会被 mutate() 展开到返回值顶层
+        return { extra: { salt: doc.settings.passcodeSalt, hash: doc.settings.passcodeHash } };
+      });
+      passInfo = { salt: probe.salt, hash: probe.hash };
+    } catch (err) {
+      const rejection = denied(err);
+      if (rejection) return rejection;
+      throw err;
+    }
+    if (!verifyPasscode(passcode, passInfo.salt, passInfo.hash)) return fail(res, 401, '口令不正确');
+
+      const outcome = await mutate(store, (doc) => {
+        if (!doc.members.some((m) => m.nickname === member)) {
           doc.members.push({ nickname: member, joinedAt: new Date().toISOString() });
         }
-        return { extra: { nickname: member } };
+        return {};
       });
-      if (denied) return fail(res, denied.status, denied.message, denied.extra || {});
-      return sendJson(res, 200, { ok: true, token: sign({ nickname: member, role: 'member' }), nickname: member });
+      return sendJson(res, 200, { ok: true, token: sign({ nickname: member, role: 'member' }), nickname: member, revision: outcome.revision });
     }
 
     /* ---------------- 修改口令 ---------------- */
