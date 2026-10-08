@@ -229,6 +229,22 @@ module.exports = async function handler(req, res) {
 
     if (action === 'logout') return sendJson(res, 200, { ok: true });
 
+    /* ---------------- 清理成员名单（需登录；名单只允许服务端改） ---------------- */
+    if (action === 'member-remove') {
+      const session = requireAuth(req);
+      if (!session) return fail(res, 401, '请先登录');
+      const names = Array.isArray(body.names)
+        ? body.names.map((n) => String(n).trim()).filter(Boolean)
+        : [String(body.member || '').trim()].filter(Boolean);
+      if (!names.length) return fail(res, 400, '请指定要移除的昵称');
+      const outcome = await mutate(store, (doc) => {
+        const before = doc.members.length;
+        doc.members = doc.members.filter((m) => !names.includes(m.nickname));
+        return { extra: { removed: before - doc.members.length } };
+      });
+      return sendJson(res, 200, { ok: true, removed: outcome.removed, revision: outcome.revision });
+    }
+
     return fail(res, 400, `未知的 action：${action}`);
   } catch (err) {
     console.error('[api/auth]', err);

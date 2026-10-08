@@ -250,6 +250,22 @@ export async function authRoute(req: Request, store: Store, url: URL): Promise<R
     }
 
     if (action === 'logout') return json({ ok: true });
+
+    /* --------- 清理成员名单（需要登录；成员名单只允许服务端改动） --------- */
+    if (action === 'member-remove') {
+      const session = await currentSession(req);
+      if (!session) return fail('请先登录', 401);
+      const names = Array.isArray(body.names)
+        ? (body.names as unknown[]).map((n) => String(n).trim()).filter(Boolean)
+        : [String(body.member ?? '').trim()].filter(Boolean);
+      if (!names.length) return fail('请指定要移除的昵称', 400);
+      const outcome = await mutate(store, (doc) => {
+        const before = doc.members.length;
+        doc.members = doc.members.filter((m) => !names.includes(m.nickname));
+        return { extra: { removed: before - doc.members.length } };
+      });
+      return json({ ok: true, removed: outcome.removed, revision: outcome.revision });
+    }
     return fail(`未知的 action：${action}`, 400);
   } catch (err) {
     const rejection = denied(err);
