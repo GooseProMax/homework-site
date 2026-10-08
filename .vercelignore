@@ -1,0 +1,9 @@
+# 部署到 Vercel 时不上传这些（只上传网站本体 + api 函数）
+.local-data/
+tests/
+server/
+.env
+.env.local
+node_modules/
+README.md
+*.log
