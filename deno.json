@@ -1,0 +1,22 @@
+{
+  "version": "1.0.0",
+  "description": "作业云服务器 · Deno Deploy 版（16 周作业板 + 多人共享）",
+  "tasks": {
+    "sync": "deno run -A scripts/sync-static.ts",
+    "start": "deno run -A server.ts",
+    "test": "deno run -A tests/deno-tests.ts"
+  },
+  "fmt": {
+    "lineWidth": 120,
+    "semiColons": true
+  },
+  "lint": {
+    "rules": {
+      "exclude": ["no-explicit-any"]
+    }
+  },
+  "deploy": {
+    "project": "homework-site",
+    "entrypoint": "server.ts"
+  }
+}

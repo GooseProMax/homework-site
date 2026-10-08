@@ -4,3 +4,7 @@ node_modules/
 .env.local
 *.log
 .local-data/
+.tools/
+
+# 构建时自动生成（deno task sync / 平台构建命令都会重新生成）
+src/static.ts
