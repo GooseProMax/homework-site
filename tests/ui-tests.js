@@ -123,9 +123,10 @@ function staticChecks() {
   const scripts = ['js/util.js', 'js/api.js', 'js/store.js', 'js/render.js', 'js/modals.js', 'js/app.js'];
   const sources = scripts.map((file) => ({ file, code: fs.readFileSync(path.join(ROOT, file), 'utf8') }));
 
-  // 1. HTML 里引用的脚本文件都存在、且都被 <script> 引到
+  // 1. HTML 里引用的脚本文件都存在、且都被 <script> 引到（允许 ?v=N 缓存参数）
   scripts.forEach((file) => {
-    check(`index.html 引用了 ${file}`, html.includes(`src="${file}"`), `缺少 <script src="${file}">`);
+    const pattern = new RegExp(`src="${file.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\?[^"]*)?"`);
+    check(`index.html 引用了 ${file}`, pattern.test(html), `缺少 <script src="${file}">`);
   });
 
   // 2. 代码里 $('#xxx') 用到的 id 必须在 HTML 里存在

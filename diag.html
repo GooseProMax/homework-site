@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>接口诊断页 · 作业云服务器</title>
+<style>
+  body { font: 15px/1.7 -apple-system, "Microsoft YaHei", sans-serif; max-width: 780px; margin: 30px auto; padding: 0 16px; color: #16203a; }
+  h1 { font-size: 20px; }
+  h2 { font-size: 16px; margin-top: 26px; }
+  fieldset { border: 1px solid #dde3f0; border-radius: 10px; padding: 14px; margin: 14px 0; }
+  legend { padding: 0 6px; font-weight: 600; color: #4361ee; }
+  label { display: block; margin: 8px 0 4px; font-size: 13px; color: #4b5878; }
+  input[type=text], input[type=password] { width: 100%; padding: 8px 10px; border: 1px solid #dde3f0; border-radius: 8px; box-sizing: border-box; }
+  button { margin-top: 12px; padding: 9px 16px; border: 0; border-radius: 8px; background: #4361ee; color: #fff; font-size: 15px; cursor: pointer; }
+  button.sec { background: #eef2fb; color: #16203a; }
+  pre { background: #0f172a; color: #d6e2ff; padding: 12px; border-radius: 8px; overflow: auto; font-size: 13px; max-height: 320px; }
+  .ok { color: #0e7a3c; font-weight: 600; }
+  .bad { color: #b3261e; font-weight: 600; }
+  .hint { color: #7c88a6; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<h1>接口诊断页</h1>
+<p class="hint">
+  这个页面不依赖作业云的任何脚本，只用一个纯 HTML 表单直接提交到你的服务器。
+  用它就能判断：到底是<b>浏览器发不出去请求</b>，还是<b>作业板自己的脚本有问题</b>。
+</p>
+
+<h2>第 0 步：先点这个（读站点状态）</h2>
+<fieldset>
+  <legend>GET /api/auth?action=status</legend>
+  <button id="btn-status" type="button">测试读取站点状态</button>
+  <pre id="out-status">（还没测）</pre>
+</fieldset>
+
+<h2>第 1 步：用真实表单提交（原生表单，不是 fetch）</h2>
+<fieldset>
+  <legend>POST /api/auth （target 指向隐藏 iframe，不会被跳转打断）</legend>
+  <p class="hint">填你之前设置的口令（现在是 <b>hw2025</b>）和名字，点提交后看下面 iframe 里的返回内容。</p>
+  <form id="real-form" method="POST" action="https://homework-site.goosepromax.deno.net/api/auth" target="sink">
+    <input type="hidden" name="action" value="intro">
+    <label>口令 passcode</label>
+    <input type="text" name="passcode" value="hw2025">
+    <label>昵称 nickname</label>
+    <input type="text" name="nickname" value="表单测试">
+    <button type="submit">原生表单提交</button>
+  </form>
+  <pre id="out-form">（还没提交）</pre>
+  <p class="hint">iframe 里显示的内容如果是一段 JSON，说明<b>表单提交这条路是通的</b>。</p>
+  <iframe name="sink" style="width:100%;height:120px;border:1px solid #dde3f0;border-radius:8px;background:#fbfcff"></iframe>
+</fieldset>
+
+<h2>第 2 步：用 fetch 提交（和作业板脚本用的是同一种方式）</h2>
+<fieldset>
+  <legend>fetch POST /api/auth</legend>
+  <button id="btn-fetch" type="button">用 fetch 提交</button>
+  <pre id="out-fetch">（还没测）</pre>
+</fieldset>
+
+<script>
+const BASE = 'https://homework-site.goosepromax.deno.net';
+const out = (id, text, cls) => {
+  const node = document.getElementById(id);
+  node.textContent = text;
+  node.className = cls || '';
+};
+
+document.getElementById('btn-status').onclick = async () => {
+  out('out-status', '请求中…');
+  const t0 = Date.now();
+  try {
+    const r = await fetch(BASE + '/api/auth?action=status');
+    const text = await r.text();
+    out('out-status', `HTTP ${r.status}  (${Date.now() - t0}ms)\n\n${text}`, r.ok ? 'ok' : 'bad');
+  } catch (err) {
+    out('out-status', `❌ 失败：${err.name}: ${err.message}\n\n（这说明浏览器连不上服务器，或者被拦截了）`, 'bad');
+  }
+};
+
+document.getElementById('btn-fetch').onclick = async () => {
+  const passcode = document.querySelector('#real-form input[name=passcode]').value;
+  const nickname = document.querySelector('#real-form input[name=nickname]').value;
+  out('out-fetch', '请求中…');
+  const t0 = Date.now();
+  try {
+    const r = await fetch(BASE + '/api/auth', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'intro', passcode, nickname }),
+    });
+    const text = await r.text();
+    out('out-fetch', `HTTP ${r.status}  (${Date.now() - t0}ms)\n\n${text}`, r.ok ? 'ok' : 'bad');
+  } catch (err) {
+    out('out-fetch', `❌ 失败：${err.name}: ${err.message}\n\n（同样是网络层问题）`, 'bad');
+  }
+};
+
+// iframe 里的返回内容也捞出来显示（同源读不到就只提示已在 iframe 内显示）
+document.getElementById('real-form').addEventListener('submit', () => {
+  const frame = window.frames.sink;
+  setTimeout(() => {
+    try {
+      const text = frame.document.body.innerText;
+      out('out-form', text ? `iframe 返回内容：\n\n${text}` : '（iframe 是空的，说明请求没到服务器）', text.includes('"ok"') || text.includes('token') ? 'ok' : 'bad');
+    } catch (e) {
+      out('out-form', '（跨域，无法读取 iframe 内容 —— 请直接看下面 iframe 里显示的文字）');
+    }
+  }, 3000);
+});
+</script>
+
+</body>
+</html>

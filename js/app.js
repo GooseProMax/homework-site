@@ -68,36 +68,51 @@
   }
 
   async function handleGateSubmit(event) {
-    event.preventDefault();
+    if (event && event.preventDefault) event.preventDefault();
     gateError('');
-    const nickname = $('#gate-nick').value.trim();
-    const effectivePass = gateMode === 'setup' ? $('#gate-newpass').value : $('#gate-pass').value;
-    if (!nickname) {
-      gateError('请填写昵称，方便记录谁交了作业');
-      return;
-    }
+    const nickInput = $('#gate-nick');
+    const newPassInput = $('#gate-newpass');
+    const passInput = $('#gate-pass');
     const btn = $('#gate-submit');
-    btn.disabled = true;
-    btn.textContent = '正在进入…';
     try {
+      const nickname = nickInput ? nickInput.value.trim() : '';
+      const effectivePass = gateMode === 'setup' && newPassInput ? newPassInput.value : (passInput ? passInput.value : '');
+      if (!nickname) {
+        gateError('请填写昵称，方便记录谁交了作业');
+        return;
+      }
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '正在进入…';
+      }
       if (gateMode === 'setup') {
         await Api.setup(effectivePass || 'local', nickname);
-      } else if (statusCache && (statusCache.members || []).some((m) => m.nickname === nickname)) {
-        await Api.login('', nickname);
+        // 初始化成功后要更新缓存，否则一旦出错重试，界面又会退回「设置口令」
+        statusCache = Object.assign({}, statusCache, {
+          initialized: true,
+          members: ((statusCache && statusCache.members) || []).concat([{ nickname }]),
+        });
       } else {
+        // 统一走 intro：口令永远要校验（选已有昵称也一样，避免空口令绕过）
         await Api.intro(effectivePass, nickname);
+        if (statusCache) {
+          const names = (statusCache.members || []).map((m) => m.nickname);
+          if (!names.includes(nickname)) statusCache.members = (statusCache.members || []).concat([{ nickname }]);
+        }
       }
       await start();
     } catch (err) {
-      if (err.payload && err.payload.needSetup) {
+      if (err && err.payload && err.payload.needSetup) {
         showGate('setup', statusCache);
-        gateError('这个作业板还没有初始化，请先设置口令');
+        gateError('这个作业板还没有初始化，请先设置一个口令');
       } else {
-        gateError(err.message || '进入失败');
+        gateError((err && err.message) || '进入失败，请重试');
       }
     } finally {
-      btn.disabled = false;
-      btn.textContent = gateMode === 'setup' ? '创建并进入' : '进入作业板';
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = gateMode === 'setup' ? '创建并进入' : '进入作业板';
+      }
     }
   }
 
@@ -197,12 +212,28 @@
 
   /* ============================== 事件绑定 ============================== */
   let bound = false;
+  let gateBound = false;
+
+  /**
+   * 登录表单必须【立刻】绑定 submit 事件。
+   * 之前是放在 bindEvents() 里的，而 bindEvents() 要等登录成功后才执行 ——
+   * 结果：第一次进站时点「进入作业板」，表单被浏览器按原生方式提交
+   * （地址栏出现 ?passcode=...&nickname=...），页面刷新，表现为「设置完口令又回到开头」。
+   */
+  function bindGateEvents() {
+    if (gateBound) return;
+    gateBound = true;
+    const form = $('#gate-form');
+    if (!form) return;
+    // 去掉 HTML 上的兜底 onsubmit="return false"，改由脚本接管
+    form.removeAttribute('onsubmit');
+    form.addEventListener('submit', handleGateSubmit);
+  }
 
   function bindEvents() {
+    bindGateEvents();
     if (bound) return;
     bound = true;
-
-    $('#gate-form').addEventListener('submit', handleGateSubmit);
 
     document.addEventListener('click', async (event) => {
       const target = event.target.closest('[data-action]');
@@ -399,6 +430,7 @@
   }
 
   document.addEventListener('DOMContentLoaded', () => {
+    bindGateEvents(); // 先绑定登录表单，再走后面的初始化流程
     boot().catch((err) => {
       console.error(err);
       showGate('login', null);
