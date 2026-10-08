@@ -1,0 +1,18 @@
+{
+  "name": "homework-site",
+  "version": "1.0.0",
+  "private": true,
+  "description": "作业云服务器：16 周课表 + 每周每节课作业 + 大作业，多人可上传",
+  "scripts": {
+    "dev": "node server/dev-server.js",
+    "test": "node tests/api-tests.js && node tests/ui-tests.js && node tests/html-check.js",
+    "test:api": "node tests/api-tests.js",
+    "test:ui": "node tests/ui-tests.js",
+    "test:html": "node tests/html-check.js",
+    "test:live": "node tests/smoke-live.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {}
+}
