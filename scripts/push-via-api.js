@@ -40,16 +40,35 @@ function askToken() {
       [
         '-NoProfile',
         '-Command',
-        "Write-Host 'Paste your GitHub token, then press Enter:' -ForegroundColor Cyan; $s = Read-Host -AsSecureString; [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))",
+        // 提示语必须写到 stderr：Write-Host 会输出到 stdout，被 execFileSync 当成令牌读回来，
+        // 之前会把 "Paste your GitHub token..." 这行提示拼在令牌前面，导致 Headers.append 报错。
+        "[Console]::Error.WriteLine('Paste your GitHub token, then press Enter:'); " +
+          '$s = Read-Host -AsSecureString; ' +
+          '[Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))',
       ],
-      { encoding: 'utf8' },
+      { encoding: 'utf8', stdio: ['inherit', 'pipe', 'inherit'] },
     );
-    return out.trim();
+    return cleanToken(out);
   } catch (err) {
     console.error('读取令牌失败：', err.message);
-    console.error('可以改用环境变量：set GITHUB_TOKEN=xxx && node scripts\\push-via-api.js');
+    console.error('可以改用环境变量：$env:GITHUB_TOKEN="xxx"; node scripts\\push-via-api.js');
     return '';
   }
+}
+
+/**
+ * 从命令输出里抠出真正的令牌。
+ * 兼容 github_pat_xxx（Fine-grained）和 ghp_xxx（Classic）两种前缀；
+ * 抠不到就退回「取最后一行的非空内容」，再不行返回空串。
+ */
+function cleanToken(raw) {
+  const text = String(raw || '');
+  const match = text.match(/(github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9]+)/);
+  if (match) return match[1];
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const last = lines.length ? lines[lines.length - 1] : '';
+  // 明显不像令牌（含空格或太长）就当作没读到，避免把提示语当令牌发出去
+  return /^[A-Za-z0-9_-]{20,255}$/.test(last) ? last : '';
 }
 
 async function api(method, endpoint, body) {
