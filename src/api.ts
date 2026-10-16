@@ -17,6 +17,16 @@ import {
 
 const MAX_BYTES = 8 * 1024 * 1024; // 单次保存上限 8MB（图片在前端已压缩）
 const MAX_RETRY = 4;
+const MAX_LOGIN_LOG = 300; // 登录历史最多保留最近 300 条，避免文档无限膨胀
+
+/** 一条登录记录 */
+export interface LoginLogEntry {
+  at: string;          // 登录时间（ISO）
+  nickname: string;    // 进来的昵称
+  action: string;      // 触发方式：setup / intro / login
+  ip?: string;         // 客户端 IP（取 x-forwarded-for 第一段）
+  ua?: string;         // User-Agent，截断到 200 字
+}
 
 export interface HomeworkDoc {
   version: number;
@@ -26,6 +36,7 @@ export interface HomeworkDoc {
   courses: unknown[];
   assignments: unknown[];
   members: { nickname: string; joinedAt?: string; lastSeenAt?: string }[];
+  loginLog: LoginLogEntry[];
 }
 
 export function defaultDoc(): HomeworkDoc {
@@ -46,6 +57,7 @@ export function defaultDoc(): HomeworkDoc {
     courses: [],
     assignments: [],
     members: [],
+    loginLog: [],
   };
 }
 
@@ -60,7 +72,28 @@ export function normalizeDoc(raw: unknown): HomeworkDoc {
     courses: Array.isArray(input.courses) ? input.courses : [],
     assignments: Array.isArray(input.assignments) ? input.assignments : [],
     members: Array.isArray(input.members) ? input.members as HomeworkDoc['members'] : [],
+    loginLog: Array.isArray(input.loginLog) ? input.loginLog as HomeworkDoc['loginLog'] : [],
   };
+}
+
+/** 从请求头里取客户端信息，用来记一条登录历史 */
+function clientInfo(req: Request): { ip: string; ua: string } {
+  // Deno Deploy / 反向代理后面，真实 IP 在 x-forwarded-for 的第一段
+  const forwarded = req.headers.get('x-forwarded-for') ?? '';
+  const ip = forwarded.split(',')[0].trim() || req.headers.get('x-real-ip') || '';
+  const ua = (req.headers.get('user-agent') ?? '').slice(0, 200);
+  return { ip, ua };
+}
+
+/** 往文档里追加一条登录记录（保留最近 MAX_LOGIN_LOG 条，最新的排最后） */
+function appendLoginLog(
+  doc: HomeworkDoc,
+  entry: { nickname: string; action: string },
+  info: { ip: string; ua: string },
+): void {
+  const list = Array.isArray(doc.loginLog) ? doc.loginLog.slice() : [];
+  list.push({ at: new Date().toISOString(), nickname: entry.nickname, action: entry.action, ip: info.ip, ua: info.ua });
+  doc.loginLog = list.slice(-MAX_LOGIN_LOG);
 }
 
 /** 读-改-写，遇到并发冲突自动重试。mutator 返回的 extra 字段会被展开到结果顶层 */
@@ -155,6 +188,7 @@ export async function authRoute(req: Request, store: Store, url: URL): Promise<R
 
       const salt = newSalt();
       const hash = await hashPasscode(effectivePass, salt);
+      const info = clientInfo(req);
       const outcome = await mutate(store, (doc) => {
         if (doc.settings.passcodeHash) {
           return { abort: { status: 409, message: '站点已经初始化过了，请直接用口令登录' } };
@@ -163,6 +197,7 @@ export async function authRoute(req: Request, store: Store, url: URL): Promise<R
         doc.settings.passcodeHash = hash;
         doc.settings.initializedAt = new Date().toISOString();
         doc.members = [{ nickname, joinedAt: new Date().toISOString() }];
+        appendLoginLog(doc, { nickname, action: 'setup' }, info);
         return { extra: { nickname } };
       });
       return json({
@@ -187,11 +222,13 @@ export async function authRoute(req: Request, store: Store, url: URL): Promise<R
       const { salt, hash } = outcome.extra as { salt: string; hash: string };
       if (!(await verifyPasscode(passcode, salt, hash))) return fail('口令不正确', 401);
 
+      const info = clientInfo(req);
       const outcome2 = await mutate(store, (doc) => {
         const now = new Date().toISOString();
         const index = doc.members.findIndex((m) => m.nickname === nickname);
         if (index >= 0) doc.members[index] = { ...doc.members[index], lastSeenAt: now };
         else doc.members.push({ nickname, joinedAt: now });
+        appendLoginLog(doc, { nickname, action: 'intro' }, info);
         return { extra: { nickname } };
       });
       return json({ ok: true, token: await signSession({ nickname }), nickname, revision: outcome2.revision });
@@ -216,10 +253,12 @@ export async function authRoute(req: Request, store: Store, url: URL): Promise<R
       const hash = probe.hash as string;
       if (!(await verifyPasscode(passcode, salt, hash))) return fail('口令不正确', 401);
 
+      const info = clientInfo(req);
       const outcome = await mutate(store, (doc) => {
         if (!doc.members.some((m) => m.nickname === member)) {
           doc.members.push({ nickname: member, joinedAt: new Date().toISOString() });
         }
+        appendLoginLog(doc, { nickname: member, action: 'login' }, info);
         return {};
       });
       return json({ ok: true, token: await signSession({ nickname: member }), nickname: member, revision: outcome.revision });
@@ -325,6 +364,8 @@ export async function dataRoute(req: Request, store: Store, url: URL): Promise<R
     }
     doc.settings = settings;
     if (current.members.length) doc.members = current.members;
+    // 登录历史同样只由服务端追加，客户端整体覆盖无效（否则前端一次保存就把日志抹平）
+    doc.loginLog = current.loginLog;
     doc.updatedAt = new Date().toISOString();
 
     const revision = await store.writeDoc(doc, serverRevision);

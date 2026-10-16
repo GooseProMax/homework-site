@@ -43,6 +43,7 @@ node scripts\push-via-api.js
 | 脚本 | 用途 |
 | --- | --- |
 | `node tests/accept-live.js` | 线上验收：静态资源 + 接口鉴权 + 页面完整性 + 国内延迟（22 项） |
+| `node tests/login-log-test.js` | 登录历史（loginLog）端到端测试 27 项（含防篡改与 300 条上限） |
 | `node tests/live-maintain.js status` | 查看线上市集状态（口令是否设置、成员名单、revision） |
 | `node tests/live-maintain.js passcode <旧> <新>` | 修改小组口令 |
 | `node tests/live-maintain.js verify <口令>` | 验证数据真的写进了 Deno KV（写入 → 等待 → 重读） |
@@ -92,6 +93,9 @@ Deno Deploy 的 Build command 里也配了 `deno task sync`，所以线上构建
 
 - 静态页面（`index.html` / `styles.css` / `js/*.js`）由 `server.ts` 直接返回，不做构建打包。
 - 口令用 PBKDF2-SHA256（10 万次迭代）哈希后存储，客户端无法覆盖；成员名单也只允许服务端改。
+- **登录历史**存在文档的 `loginLog` 数组里（服务端追加，最多保留最近 300 条）。查看入口：网站「⚙ 设置 → 登录历史」。
+  记录字段：`at`（时间）/ `nickname` / `action`（setup / intro / login）/ `ip` / `ua`。
+  和口令哈希、成员名单一样，`loginLog` 属于**服务端保留字段**，客户端 `PUT /api/data` 整体覆盖无效。
 - 保存采用乐观锁：版本号落后超过 2 会被拒绝（409），前端按 `updatedAt` 合并两边改动。
 - 图片在前端压缩（最长边 1600px、JPEG、约 320KB 以内）后以 data URL 存入同一条数据，单次保存上限 8MB。
 
@@ -102,5 +106,6 @@ Deno Deploy 的 Build command 里也配了 `deno task sync`，所以线上构建
 | 设置口令后页面回到开头 | 表单 submit 事件绑定晚于用户点击，浏览器原生提交导致刷新 | 事件改为脚本加载时立即绑定 + HTML `onsubmit="return false"` 兜底 |
 | 知道昵称就能免口令进入 | `login` 动作对已有成员跳过口令校验 | 所有登录路径统一强制校验口令 |
 | 客户端能改口令哈希 | `PUT /api/data` 直接接受客户端传入的 settings | 服务端保留 `passcodeHash` / `passcodeSalt` / `members`，客户端覆盖无效 |
-| 中文目录下 Deno 找不到文件 | `URL.pathname` 把目录名百分号编码 | 改用 file URL / `decodeURIComponent` |
+| 登录日志被前端保存抹掉 | 前端 `PUT` 整份 doc，服务端只保留 settings/members，`loginLog` 会被清空 | `dataRoute` 里把 `loginLog` 也列为服务端保留字段（`doc.loginLog = current.loginLog`） |
+| 中文目录下 Deno 报 OS Error 5 | `deno check` / `deno run` 读取含中文的路径时被系统拒绝（`FormatMessageW() error 15105`），**与代码无关** | 用 8.3 短路径或临时复制到 ASCII 目录；日常验证走 `node`（Node 版接口同构） |
 | PowerShell 脚本报语法错 | PS 5.1 把无 BOM 的 UTF-8 当 GBK 读 | 所有 `.ps1` 脚本保持纯 ASCII |

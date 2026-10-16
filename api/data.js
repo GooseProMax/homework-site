@@ -60,6 +60,8 @@ module.exports = async function handler(req, res) {
       if (previousSettings[key] !== undefined) doc.settings[key] = previousSettings[key];
     });
     if (Array.isArray(previous.members) && previous.members.length) doc.members = previous.members;
+    // 登录历史只由服务端追加，客户端整体覆盖无效（否则前端一次保存就把日志抹平）
+    doc.loginLog = Array.isArray(previous.loginLog) ? previous.loginLog : (Array.isArray(doc.loginLog) ? doc.loginLog : []);
 
     doc.updatedAt = new Date().toISOString();
     const revision = await store.writeDoc(doc, serverRevision);

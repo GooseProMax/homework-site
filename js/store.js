@@ -22,6 +22,7 @@
     courses: [],
     assignments: [],
     members: [],
+    loginLog: [],
   };
 
   function normalizeDoc(raw) {
@@ -32,6 +33,7 @@
     doc.courses = Array.isArray(raw.courses) ? raw.courses : [];
     doc.assignments = Array.isArray(raw.assignments) ? raw.assignments : [];
     doc.members = Array.isArray(raw.members) ? raw.members : [];
+    doc.loginLog = Array.isArray(raw.loginLog) ? raw.loginLog : [];
     return doc;
   }
 

@@ -362,6 +362,67 @@
     });
   }
 
+  /* ----------------------------- 登录历史 ----------------------------- */
+  const LOGIN_ACTION_LABEL = { setup: '首次初始化', intro: '口令进入', login: '口令登录' };
+
+  /** 把 UA 缩成「浏览器 · 系统」这类好读的短标签 */
+  function describeUa(ua) {
+    const text = String(ua || '');
+    if (!text) return '未知设备';
+    const browser = /Edg\//.test(text) ? 'Edge'
+      : /OPR\/|Opera/.test(text) ? 'Opera'
+      : /Chrome\//.test(text) ? 'Chrome'
+      : /Firefox\//.test(text) ? 'Firefox'
+      : /Safari\//.test(text) ? 'Safari'
+      : '浏览器';
+    const os = /Windows NT/.test(text) ? 'Windows'
+      : /iPhone|iPad/.test(text) ? 'iOS'
+      : /Android/.test(text) ? 'Android'
+      : /Mac OS X/.test(text) ? 'macOS'
+      : /Linux/.test(text) ? 'Linux'
+      : '';
+    return os ? `${browser} · ${os}` : browser;
+  }
+
+  function loginLogRow(entry) {
+    const when = entry && entry.at ? U.formatDateTime(entry.at) : '时间未知';
+    const action = LOGIN_ACTION_LABEL[entry && entry.action] || (entry && entry.action) || '登录';
+    return el('div', { class: 'kv-row' }, [
+      el('b', { text: entry && entry.nickname ? entry.nickname : '（未署名）' }),
+      el('span', {
+        text: [when, action, describeUa(entry && entry.ua), entry && entry.ip ? entry.ip : ''].filter(Boolean).join(' · '),
+      }),
+    ]);
+  }
+
+  function openLoginHistory() {
+    const log = (Store.doc.loginLog || []).slice().reverse();
+    const box = el('div', { class: 'kv' });
+
+    if (!log.length) {
+      box.appendChild(el('p', { class: 'hint', text: '还没有登录记录。从下一次有人进来开始，这里会记下时间、昵称、设备与 IP。' }));
+    } else {
+      log.slice(0, 100).forEach((entry) => box.appendChild(loginLogRow(entry)));
+      if (log.length > 100) {
+        box.appendChild(el('p', { class: 'hint', text: `共 ${log.length} 条，仅显示最近 100 条。` }));
+      }
+    }
+
+    openModal({
+      title: `登录历史（${log.length} 条）`,
+      wide: true,
+      node: el('div', {}, [
+        el('p', {
+          class: 'hint',
+          style: 'margin:0 0 10px',
+          text: '记录由服务器保存，最多保留最近 300 条，客户端改不掉。时间按本机时区显示。',
+        }),
+        box,
+      ]),
+      buttons: [{ label: '关闭', key: 'close', kind: 'btn-primary', onClick: () => closeModal() }],
+    });
+  }
+
   /* ----------------------------- 设置 ----------------------------- */
   function openSettings() {
     const settings = Store.doc.settings || {};
@@ -413,6 +474,14 @@
           }
         },
       }),
+      el('hr', { style: 'border:none;border-top:1px solid #e2e7f2;margin:4px 0' }),
+      el('h3', { style: 'margin:0;font-size:14px', text: '登录历史' }),
+      el('div', { class: 'row-btns' }, [
+        el('button', {
+          class: 'btn btn-sm', text: `查看登录记录（${(Store.doc.loginLog || []).length} 条）`,
+          onclick: () => openLoginHistory(),
+        }),
+      ]),
       el('hr', { style: 'border:none;border-top:1px solid #e2e7f2;margin:4px 0' }),
       el('h3', { style: 'margin:0;font-size:14px', text: '数据与同步' }),
       el('div', { class: 'row-btns' }, [
@@ -487,5 +556,5 @@
     box.hidden = false;
   }
 
-  window.Modals = { openModal, closeModal, confirmDialog, openAssignmentEditor, openScheduleEditor, openSettings, zoomImage };
+  window.Modals = { openModal, closeModal, confirmDialog, openAssignmentEditor, openScheduleEditor, openSettings, openLoginHistory, zoomImage };
 }());

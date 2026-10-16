@@ -24,6 +24,7 @@ const {
 } = require('./_lib/http');
 
 const MAX_RETRY = 3;
+const MAX_LOGIN_LOG = 300; // 登录历史最多保留最近 300 条，避免文档无限膨胀
 
 function defaultDoc() {
   const now = new Date().toISOString();
@@ -42,6 +43,7 @@ function defaultDoc() {
     courses: [],
     assignments: [],
     members: [],
+    loginLog: [],
   };
 }
 
@@ -55,7 +57,24 @@ function normalizeDoc(doc) {
     courses: Array.isArray(doc.courses) ? doc.courses : [],
     assignments: Array.isArray(doc.assignments) ? doc.assignments : [],
     members: Array.isArray(doc.members) ? doc.members : [],
+    loginLog: Array.isArray(doc.loginLog) ? doc.loginLog : [],
   };
+}
+
+/** 从请求头里取客户端信息，用来记一条登录历史 */
+function clientInfo(req) {
+  const headers = req.headers || {};
+  const forwarded = String(headers['x-forwarded-for'] || headers['x-real-ip'] || '');
+  const ip = forwarded.split(',')[0].trim();
+  const ua = String(headers['user-agent'] || '').slice(0, 200);
+  return { ip, ua };
+}
+
+/** 往文档里追加一条登录记录（保留最近 MAX_LOGIN_LOG 条，最新的排最后） */
+function appendLoginLog(doc, entry, info) {
+  const list = Array.isArray(doc.loginLog) ? doc.loginLog.slice() : [];
+  list.push({ at: new Date().toISOString(), nickname: entry.nickname, action: entry.action, ip: info.ip, ua: info.ua });
+  doc.loginLog = list.slice(-MAX_LOGIN_LOG);
 }
 
 /** 乐观锁下的「读-改-写」，冲突自动重试 */
@@ -139,6 +158,7 @@ module.exports = async function handler(req, res) {
         doc.settings.passcodeHash = hashPasscode(effectivePass, salt);
         doc.settings.initializedAt = new Date().toISOString();
         doc.members = [{ nickname, joinedAt: new Date().toISOString() }];
+        appendLoginLog(doc, { nickname, action: 'setup' }, clientInfo(req));
         return { extra: { nickname } };
       });
       if (outcome.abort) return fail(res, outcome.status, outcome.message);
@@ -155,6 +175,7 @@ module.exports = async function handler(req, res) {
     if (action === 'intro') {
       if (!nickname) return fail(res, 400, '请填写你的昵称');
       let denied = null;
+      const info = clientInfo(req);
       const outcome = await mutate(store, (doc) => {
         if (!doc.settings.passcodeHash) {
           denied = { status: 428, message: '站点还没有初始化，请先设置一个口令', extra: { needSetup: true } };
@@ -168,6 +189,7 @@ module.exports = async function handler(req, res) {
         const index = doc.members.findIndex((m) => m.nickname === nickname);
         if (index >= 0) doc.members[index] = { ...doc.members[index], lastSeenAt: now };
         else doc.members.push({ nickname, joinedAt: now });
+        appendLoginLog(doc, { nickname, action: 'intro' }, info);
         return { extra: { nickname } };
       });
       if (denied) return fail(res, denied.status, denied.message, denied.extra || {});
@@ -198,10 +220,12 @@ module.exports = async function handler(req, res) {
     }
     if (!verifyPasscode(passcode, passInfo.salt, passInfo.hash)) return fail(res, 401, '口令不正确');
 
+      const info = clientInfo(req);
       const outcome = await mutate(store, (doc) => {
         if (!doc.members.some((m) => m.nickname === member)) {
           doc.members.push({ nickname: member, joinedAt: new Date().toISOString() });
         }
+        appendLoginLog(doc, { nickname: member, action: 'login' }, info);
         return {};
       });
       return sendJson(res, 200, { ok: true, token: sign({ nickname: member, role: 'member' }), nickname: member, revision: outcome.revision });
