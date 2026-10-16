@@ -409,7 +409,7 @@ export async function dataRoute(req: Request, store: Store, url: URL): Promise<R
 
 /* =============================== 自检接口 =============================== */
 
-export async function healthRoute(store: Store): Promise<Response> {
+export async function healthRoute(store: Store, req?: Request): Promise<Response> {
   const report: Record<string, unknown> = {
     ok: false,
     time: new Date().toISOString(),
@@ -418,6 +418,12 @@ export async function healthRoute(store: Store): Promise<Response> {
     appSecretConfigured: Boolean(Deno.env.get('APP_SECRET')),
     sitePasscodeConfigured: Boolean(Deno.env.get('SITE_PASSCODE')),
   };
+  // 临时诊断：?headers=1 回显服务端实际收到的请求头（用来确认客户端 IP 藏在哪个头里）
+  if (req && new URL(req.url).searchParams.get('headers') === '1') {
+    const all: Record<string, string> = {};
+    for (const [k, v] of req.headers) all[k] = v;
+    return json({ headers: all, clientInfo: clientInfo(req) });
+  }
   try {
     const health = await store.health();
     const { revision } = await store.readDoc();
