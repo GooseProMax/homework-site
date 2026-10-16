@@ -64,38 +64,20 @@ function normalizeDoc(doc) {
 /**
  * 从请求头里取客户端信息，用来记一条登录历史。
  *
- * 不同平台放 IP 的头不一样，按优先级挨个试：
- *   x-forwarded-for  最常见的反代约定（取第一段，即最原始的客户端）
- *   x-real-ip        Nginx 常用
- *   cf-connecting-ip Cloudflare
- *   forwarded        RFC 7239 标准头，形如 for=1.2.3.4;proto=https
- * 一个都没有就留空——不编造。
+ * 只取 User-Agent。
+ * 【关于 IP】Deno Deploy 不提供真实客户端 IP——平台既不下发 x-forwarded-for，
+ * 也不校验客户端自带的同名字段（实测：不带头时为 null，带 1.2.3.4 就原样透传），
+ * 即该值可被任意伪造。为了线上/本地行为一致，两版都不采集 IP。
  */
 function clientInfo(req) {
   const headers = req.headers || {};
-  const header = (name) => String(headers[name] || '');
-
-  let ip = header('x-forwarded-for').split(',')[0].trim()
-    || header('x-real-ip').trim()
-    || header('cf-connecting-ip').trim();
-
-  if (!ip) {
-    const match = header('forwarded').match(/for=\s*"?\[?([^;,"\]]+)\]?"?/i);
-    if (match) ip = match[1].trim();
-  }
-  // 去掉 IPv6 的方括号；只有 IPv4 才需要剥掉 ":端口"（IPv6 本身全是冒号，不能动）
-  ip = ip.replace(/^\[|\]$/g, '');
-  if (/^\d+\.\d+\.\d+\.\d+:\d+$/.test(ip)) ip = ip.replace(/:\d+$/, '');
-  ip = ip.slice(0, 45);
-
-  const ua = header('user-agent').slice(0, 200);
-  return { ip, ua };
+  return { ua: String(headers['user-agent'] || '').slice(0, 200) };
 }
 
 /** 往文档里追加一条登录记录（保留最近 MAX_LOGIN_LOG 条，最新的排最后） */
 function appendLoginLog(doc, entry, info) {
   const list = Array.isArray(doc.loginLog) ? doc.loginLog.slice() : [];
-  list.push({ at: new Date().toISOString(), nickname: entry.nickname, action: entry.action, ip: info.ip, ua: info.ua });
+  list.push({ at: new Date().toISOString(), nickname: entry.nickname, action: entry.action, ua: info.ua });
   doc.loginLog = list.slice(-MAX_LOGIN_LOG);
 }
 

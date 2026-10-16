@@ -390,7 +390,7 @@
     return el('div', { class: 'kv-row' }, [
       el('b', { text: entry && entry.nickname ? entry.nickname : '（未署名）' }),
       el('span', {
-        text: [when, action, describeUa(entry && entry.ua), entry && entry.ip ? entry.ip : ''].filter(Boolean).join(' · '),
+        text: [when, action, describeUa(entry && entry.ua)].filter(Boolean).join(' · '),
       }),
     ]);
   }
@@ -400,7 +400,7 @@
     const box = el('div', { class: 'kv' });
 
     if (!log.length) {
-      box.appendChild(el('p', { class: 'hint', text: '还没有登录记录。从下一次有人进来开始，这里会记下时间、昵称、设备与 IP。' }));
+      box.appendChild(el('p', { class: 'hint', text: '还没有登录记录。从下一次有人进来开始，这里会记下时间、昵称与设备。' }));
     } else {
       log.slice(0, 100).forEach((entry) => box.appendChild(loginLogRow(entry)));
       if (log.length > 100) {

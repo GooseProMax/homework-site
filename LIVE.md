@@ -94,8 +94,11 @@ Deno Deploy 的 Build command 里也配了 `deno task sync`，所以线上构建
 - 静态页面（`index.html` / `styles.css` / `js/*.js`）由 `server.ts` 直接返回，不做构建打包。
 - 口令用 PBKDF2-SHA256（10 万次迭代）哈希后存储，客户端无法覆盖；成员名单也只允许服务端改。
 - **登录历史**存在文档的 `loginLog` 数组里（服务端追加，最多保留最近 300 条）。查看入口：网站「⚙ 设置 → 登录历史」。
-  记录字段：`at`（时间）/ `nickname` / `action`（setup / intro / login）/ `ip` / `ua`。
+  记录字段：`at`（时间）/ `nickname` / `action`（setup / intro / login）/ `ua`（设备，截 200 字）。
   和口令哈希、成员名单一样，`loginLog` 属于**服务端保留字段**，客户端 `PUT /api/data` 整体覆盖无效。
+- **不记录 IP**：Deno Deploy 既不下发 `x-forwarded-for`，也不校验客户端自带的同名字段
+  （实测：不带头时该头为 `null`，带 `1.2.3.4` 就原样透传）。也就是说那个值谁都能伪造，
+  记下来看着像证据其实不可信，所以两版后端都不采集 IP。
 - 保存采用乐观锁：版本号落后超过 2 会被拒绝（409），前端按 `updatedAt` 合并两边改动。
 - 图片在前端压缩（最长边 1600px、JPEG、约 320KB 以内）后以 data URL 存入同一条数据，单次保存上限 8MB。
 
@@ -107,5 +110,7 @@ Deno Deploy 的 Build command 里也配了 `deno task sync`，所以线上构建
 | 知道昵称就能免口令进入 | `login` 动作对已有成员跳过口令校验 | 所有登录路径统一强制校验口令 |
 | 客户端能改口令哈希 | `PUT /api/data` 直接接受客户端传入的 settings | 服务端保留 `passcodeHash` / `passcodeSalt` / `members`，客户端覆盖无效 |
 | 登录日志被前端保存抹掉 | 前端 `PUT` 整份 doc，服务端只保留 settings/members，`loginLog` 会被清空 | `dataRoute` 里把 `loginLog` 也列为服务端保留字段（`doc.loginLog = current.loginLog`） |
+| 登录日志里的 IP 拿不到 / 可伪造 | Deno Deploy 不提供真实 IP；且 `x-forwarded-for` 是客户端可随意填的，平台原样透传 | 不采集 IP（字段已移除）。诊断方法：临时加 `?headers=1` 回显请求头，用「带假 IP / 不带 IP」两组对照即可判定该头是否可信 |
+| 推送脚本读令牌报 `Headers.append: "Bearer Paste your GitHub token..." is an invalid header value` | `askToken()` 里 `Write-Host` 把提示语输出到了 stdout，被 `execFileSync` 连同令牌一起读回 | 提示语改走 stderr（`[Console]::Error.WriteLine`），并加 `cleanToken()` 从输出里正则抠出 `github_pat_*` / `ghp_*` |
 | 中文目录下 Deno 报 OS Error 5 | `deno check` / `deno run` 读取含中文的路径时被系统拒绝（`FormatMessageW() error 15105`），**与代码无关** | 用 8.3 短路径或临时复制到 ASCII 目录；日常验证走 `node`（Node 版接口同构） |
 | PowerShell 脚本报语法错 | PS 5.1 把无 BOM 的 UTF-8 当 GBK 读 | 所有 `.ps1` 脚本保持纯 ASCII |

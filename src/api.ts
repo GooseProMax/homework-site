@@ -24,7 +24,6 @@ export interface LoginLogEntry {
   at: string;          // 登录时间（ISO）
   nickname: string;    // 进来的昵称
   action: string;      // 触发方式：setup / intro / login
-  ip?: string;         // 客户端 IP（取 x-forwarded-for 第一段）
   ua?: string;         // User-Agent，截断到 200 字
 }
 
@@ -79,42 +78,23 @@ export function normalizeDoc(raw: unknown): HomeworkDoc {
 /**
  * 从请求头里取客户端信息，用来记一条登录历史。
  *
- * 不同平台放 IP 的头不一样，按优先级挨个试：
- *   x-forwarded-for  最常见的反代约定（取第一段，即最原始的客户端）
- *   x-real-ip        Nginx 常用
- *   cf-connecting-ip Cloudflare
- *   forwarded        RFC 7239 标准头，形如 for=1.2.3.4;proto=https
- * Deno Deploy 有时一个都不给，那就留空——不编造。
+ * 只取 User-Agent。
+ * 【关于 IP】Deno Deploy 不提供真实客户端 IP——平台既不下发 x-forwarded-for，
+ * 也不校验客户端自带的同名字段（实测：不带头时为 null，带 1.2.3.4 就原样透传）。
+ * 也就是说那个值谁都能伪造，记下来反而不如不记，所以这里不采集 IP。
  */
-function clientInfo(req: Request): { ip: string; ua: string } {
-  const header = (name: string) => req.headers.get(name) ?? '';
-
-  let ip = header('x-forwarded-for').split(',')[0].trim()
-    || header('x-real-ip').trim()
-    || header('cf-connecting-ip').trim();
-
-  if (!ip) {
-    // RFC 7239: forwarded: for=203.0.113.7;proto=https, for=10.0.0.1
-    const match = header('forwarded').match(/for=\s*"?\[?([^;,"\]]+)\]?"?/i);
-    if (match) ip = match[1].trim();
-  }
-  // 去掉 IPv6 的方括号；只有 IPv4 才需要剥掉 ":端口"（IPv6 本身全是冒号，不能动）
-  ip = ip.replace(/^\[|\]$/g, '');
-  if (/^\d+\.\d+\.\d+\.\d+:\d+$/.test(ip)) ip = ip.replace(/:\d+$/, '');
-  ip = ip.slice(0, 45);
-
-  const ua = header('user-agent').slice(0, 200);
-  return { ip, ua };
+function clientInfo(req: Request): { ua: string } {
+  return { ua: (req.headers.get('user-agent') ?? '').slice(0, 200) };
 }
 
 /** 往文档里追加一条登录记录（保留最近 MAX_LOGIN_LOG 条，最新的排最后） */
 function appendLoginLog(
   doc: HomeworkDoc,
   entry: { nickname: string; action: string },
-  info: { ip: string; ua: string },
+  info: { ua: string },
 ): void {
   const list = Array.isArray(doc.loginLog) ? doc.loginLog.slice() : [];
-  list.push({ at: new Date().toISOString(), nickname: entry.nickname, action: entry.action, ip: info.ip, ua: info.ua });
+  list.push({ at: new Date().toISOString(), nickname: entry.nickname, action: entry.action, ua: info.ua });
   doc.loginLog = list.slice(-MAX_LOGIN_LOG);
 }
 
@@ -409,7 +389,7 @@ export async function dataRoute(req: Request, store: Store, url: URL): Promise<R
 
 /* =============================== 自检接口 =============================== */
 
-export async function healthRoute(store: Store, req?: Request): Promise<Response> {
+export async function healthRoute(store: Store): Promise<Response> {
   const report: Record<string, unknown> = {
     ok: false,
     time: new Date().toISOString(),
@@ -418,12 +398,6 @@ export async function healthRoute(store: Store, req?: Request): Promise<Response
     appSecretConfigured: Boolean(Deno.env.get('APP_SECRET')),
     sitePasscodeConfigured: Boolean(Deno.env.get('SITE_PASSCODE')),
   };
-  // 临时诊断：?headers=1 回显服务端实际收到的请求头（用来确认客户端 IP 藏在哪个头里）
-  if (req && new URL(req.url).searchParams.get('headers') === '1') {
-    const all: Record<string, string> = {};
-    for (const [k, v] of req.headers) all[k] = v;
-    return json({ headers: all, clientInfo: clientInfo(req) });
-  }
   try {
     const health = await store.health();
     const { revision } = await store.readDoc();

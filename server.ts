@@ -47,7 +47,7 @@ async function handler(req: Request): Promise<Response> {
   if (pathname === '/api/health') {
     if (req.method !== 'GET' && req.method !== 'HEAD') return fail('不支持的请求方法', 405);
     const store = await getStore();
-    return await healthRoute(store, req);
+    return await healthRoute(store);
   }
 
   if (pathname === '/api/auth') {
