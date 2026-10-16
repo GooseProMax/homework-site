@@ -61,12 +61,34 @@ function normalizeDoc(doc) {
   };
 }
 
-/** 从请求头里取客户端信息，用来记一条登录历史 */
+/**
+ * 从请求头里取客户端信息，用来记一条登录历史。
+ *
+ * 不同平台放 IP 的头不一样，按优先级挨个试：
+ *   x-forwarded-for  最常见的反代约定（取第一段，即最原始的客户端）
+ *   x-real-ip        Nginx 常用
+ *   cf-connecting-ip Cloudflare
+ *   forwarded        RFC 7239 标准头，形如 for=1.2.3.4;proto=https
+ * 一个都没有就留空——不编造。
+ */
 function clientInfo(req) {
   const headers = req.headers || {};
-  const forwarded = String(headers['x-forwarded-for'] || headers['x-real-ip'] || '');
-  const ip = forwarded.split(',')[0].trim();
-  const ua = String(headers['user-agent'] || '').slice(0, 200);
+  const header = (name) => String(headers[name] || '');
+
+  let ip = header('x-forwarded-for').split(',')[0].trim()
+    || header('x-real-ip').trim()
+    || header('cf-connecting-ip').trim();
+
+  if (!ip) {
+    const match = header('forwarded').match(/for=\s*"?\[?([^;,"\]]+)\]?"?/i);
+    if (match) ip = match[1].trim();
+  }
+  // 去掉 IPv6 的方括号；只有 IPv4 才需要剥掉 ":端口"（IPv6 本身全是冒号，不能动）
+  ip = ip.replace(/^\[|\]$/g, '');
+  if (/^\d+\.\d+\.\d+\.\d+:\d+$/.test(ip)) ip = ip.replace(/:\d+$/, '');
+  ip = ip.slice(0, 45);
+
+  const ua = header('user-agent').slice(0, 200);
   return { ip, ua };
 }
 

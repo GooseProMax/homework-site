@@ -76,12 +76,34 @@ export function normalizeDoc(raw: unknown): HomeworkDoc {
   };
 }
 
-/** 从请求头里取客户端信息，用来记一条登录历史 */
+/**
+ * 从请求头里取客户端信息，用来记一条登录历史。
+ *
+ * 不同平台放 IP 的头不一样，按优先级挨个试：
+ *   x-forwarded-for  最常见的反代约定（取第一段，即最原始的客户端）
+ *   x-real-ip        Nginx 常用
+ *   cf-connecting-ip Cloudflare
+ *   forwarded        RFC 7239 标准头，形如 for=1.2.3.4;proto=https
+ * Deno Deploy 有时一个都不给，那就留空——不编造。
+ */
 function clientInfo(req: Request): { ip: string; ua: string } {
-  // Deno Deploy / 反向代理后面，真实 IP 在 x-forwarded-for 的第一段
-  const forwarded = req.headers.get('x-forwarded-for') ?? '';
-  const ip = forwarded.split(',')[0].trim() || req.headers.get('x-real-ip') || '';
-  const ua = (req.headers.get('user-agent') ?? '').slice(0, 200);
+  const header = (name: string) => req.headers.get(name) ?? '';
+
+  let ip = header('x-forwarded-for').split(',')[0].trim()
+    || header('x-real-ip').trim()
+    || header('cf-connecting-ip').trim();
+
+  if (!ip) {
+    // RFC 7239: forwarded: for=203.0.113.7;proto=https, for=10.0.0.1
+    const match = header('forwarded').match(/for=\s*"?\[?([^;,"\]]+)\]?"?/i);
+    if (match) ip = match[1].trim();
+  }
+  // 去掉 IPv6 的方括号；只有 IPv4 才需要剥掉 ":端口"（IPv6 本身全是冒号，不能动）
+  ip = ip.replace(/^\[|\]$/g, '');
+  if (/^\d+\.\d+\.\d+\.\d+:\d+$/.test(ip)) ip = ip.replace(/:\d+$/, '');
+  ip = ip.slice(0, 45);
+
+  const ua = header('user-agent').slice(0, 200);
   return { ip, ua };
 }
 

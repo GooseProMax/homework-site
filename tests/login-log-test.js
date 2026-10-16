@@ -162,6 +162,31 @@ function readDoc() {
   check('连续登录后记录数不超过 300', doc.loginLog.length <= 300, `实际 ${doc.loginLog.length}`);
   check('保留的是最近的记录', doc.loginLog[doc.loginLog.length - 1].nickname === '压测319', doc.loginLog[doc.loginLog.length - 1].nickname);
 
+  /* 10. clientInfo 对各种代理头的兼容
+   * 注意：callHandler 默认会带 x-forwarded-for，测回退分支时要显式清空它，
+   * 否则永远命中第一个分支，回退逻辑根本测不到。
+   */
+  const noXff = { 'x-forwarded-for': '', 'x-real-ip': '', 'cf-connecting-ip': '', forwarded: '' };
+  const ipCases = [
+    ['x-forwarded-for 单值', { 'x-forwarded-for': '203.0.113.9' }, '203.0.113.9'],
+    ['x-forwarded-for 多段取第一段', { 'x-forwarded-for': '203.0.113.9, 10.0.0.1, 10.0.0.2' }, '203.0.113.9'],
+    ['x-real-ip 回退', Object.assign({}, noXff, { 'x-real-ip': '198.51.100.3' }), '198.51.100.3'],
+    ['cf-connecting-ip 回退', Object.assign({}, noXff, { 'cf-connecting-ip': '192.0.2.5' }), '192.0.2.5'],
+    ['rfc7239 forwarded 头', Object.assign({}, noXff, { forwarded: 'for=203.0.113.77;proto=https' }), '203.0.113.77'],
+    ['IPv6 带方括号', { 'x-forwarded-for': '[2001:db8::1]' }, '2001:db8::1'],
+    ['IPv6 裸地址不被端口规则误伤', { 'x-forwarded-for': '2001:db8::1' }, '2001:db8::1'],
+    ['IPv4 带端口', { 'x-forwarded-for': '203.0.113.9:51234' }, '203.0.113.9'],
+    ['一个头都没有就留空', noXff, ''],
+  ];
+  for (const [label, extraHeaders, expected] of ipCases) {
+    await callHandler(auth, {
+      body: { action: 'intro', passcode: 'hw2025', nickname: '头测试' },
+      headers: extraHeaders,
+    });
+    const last = readDoc().doc.loginLog.slice(-1)[0];
+    check(`IP 解析：${label}`, last.ip === expected, `得到 "${last.ip}"，期望 "${expected}"`);
+  }
+
   /* 清理 */
   fs.rmSync(tmpDir, { recursive: true, force: true });
 
